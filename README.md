@@ -88,15 +88,6 @@ To ensure the model is not a "black box," **SHAP** is used for explainability:
 *   **Local Explanations**: For individual predictions in the "Prediction Tool," a SHAP force plot visualizes the features that push the model's output towards or away from the final prediction.
 *   **Global Explanations**: The training notebook also generates global feature importance plots, providing an overview of which features are most influential across all predictions.
 
-**Historical Analysis Tab**
-![Historical Analysis](https://via.placeholder.com/800x400.png?text=Screenshot+of+Historical+Analysis+Tab)
-
-**Prediction Tool with SHAP Explanation**
-![Prediction Tool](https://via.placeholder.com/800x400.png?text=Screenshot+of+Prediction+Tool)
-
-**Real-Time Simulation Tab**
-![Real-Time Simulation](https://via.placeholder.com/800x400.png?text=Screenshot+of+Real-Time+Simulation)
-
 ## 📄 License
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
