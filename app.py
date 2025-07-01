@@ -180,22 +180,62 @@ with tab2:
         class_labels = model.classes_
         predicted_criticality = class_labels[prediction_class[0]]
         
-        st.subheader("Prediction Result")
-        st.metric("Predicted Criticality", predicted_criticality)
+        st.subheader("Criticality")
+        # st.metric("Predicted Criticality", predicted_criticality)
+        if predicted_criticality==0:
+            st.error('High')
+        elif predicted_criticality==1:
+            st.warning('Medium')
+        else:
+            st.success('Low')
+
+        #SHAP Analysis is under development
 
         # Display probabilities in a more readable format
-        st.write("Prediction Probabilities:")
-        prob_df = pd.DataFrame(prediction_proba, columns=class_labels)
-        st.dataframe(prob_df.style.format("{:.2%}"))
+        # st.write("Prediction Probabilities:")
+        # prob_df = pd.DataFrame(prediction_proba, columns=class_labels)
+        # st.dataframe(prob_df.style.format("{:.2%}"))
 
-        # --- SHAP Explanation Plot ---
-        st.subheader("Prediction Explanation (SHAP Analysis)")
-        shap_values = explainer.shap_values(processed_input)
+        # # --- SHAP Explanation Plot ---
+        # st.subheader("Prediction Explanation (SHAP Analysis)")
+        # shap_values = explainer.shap_values(processed_input)
 
-        # Create the force plot using st.pydeck_chart as a placeholder for HTML rendering
-        shap_html = f"<head>{shap.getjs()}</head><body>{shap.force_plot(explainer.expected_value[prediction_class[0]], shap_values[prediction_class[0]], input_data, show=False)}</body>"
-        st.components.v1.html(shap_html, height=150)
-        st.info("The plot above shows the features pushing the prediction towards (red) or away from (blue) the final outcome. The 'base value' is the average prediction over the training data.")
+        # try:
+        #     # Calculate SHAP values for the specific input
+        #     shap_values = explainer.shap_values(processed_input)
+
+        #     # For a multi-class model, shap_values and expected_value are lists.
+        #     # We need to select the values for the class that was predicted.
+        #     predicted_class_index = prediction_class[0]
+
+        #     st.write(f"Displaying explanation for the predicted class: **{model.classes_[predicted_class_index]}**")
+
+        #     # Correctly call shap.force_plot with the base value as the first argument.
+        #     # This function is ideal for explaining a single prediction.
+        #     shap_plot = shap.force_plot(
+        #         base_value=explainer.expected_value[predicted_class_index],
+        #         shap_values=shap_values[predicted_class_index],
+        #         features=input_data
+        #     )
+            
+        #     # To render the plot in Streamlit, we wrap its HTML output with the necessary SHAP JavaScript.
+        #     shap_html = f"<head>{shap.getjs()}</head><body>{shap_plot.html()}</body>"
+        #     st.components.v1.html(shap_html, height=150)
+            
+        #     st.info("""
+        #     **How to read this plot:**
+        #     *   The **base value** is the average prediction for this class across the entire training dataset.
+        #     *   Features in **red** are pushing the prediction score **higher** (towards a 'High' or 'Medium' criticality).
+        #     *   Features in **blue** are pushing the prediction score **lower**.
+        #     *   The final **output value** is the model's raw score for this specific prediction.
+        #     """)
+
+        # except Exception as e:
+        #     st.error(f"An error occurred while generating the SHAP explanation plot: {e}")
+        #     st.warning("The prediction is still valid, but the explanation could not be displayed.")
+
+        # st.components.v1.html(shap_html, height=150)
+        # st.info("The plot above shows the features pushing the prediction towards (red) or away from (blue) the final outcome. The 'base value' is the average prediction over the training data.")
 
 # ==============================================================================
 # TAB 3: REAL-TIME SIMULATION
