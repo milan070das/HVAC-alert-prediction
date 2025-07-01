@@ -5,6 +5,9 @@ import numpy as np
 import plotly.express as px
 import shap
 import time
+import matplotlib.pyplot as plt
+from io import BytesIO
+import base64
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -13,37 +16,52 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+plt.style.use('default')
 
-# --- Load Model, Data, and Preprocessor ---
-# This function caches the loaded objects to improve performance
+# --- Load All Necessary Assets ---
 @st.cache_resource
 def load_resources():
-    """Loads the ML model, preprocessor, SHAP explainer, and historical data."""
+    """
+    Loads the ML model, preprocessor, label encoder, feature names, 
+    and the SHAP explainer from disk.
+    """
     try:
-        model = joblib.load('hvac_xgboost_model.joblib')
-        preprocessor = joblib.load('hvac_preprocessor.joblib')
-        data = pd.read_csv('hvac_maintenance_data.csv')
-        
-        # Create a SHAP explainer object
-        # This uses the preprocessed training data's structure to create explanations
-        X = data.drop(columns=['criticality', 'alert_id'])
-        X_processed = preprocessor.transform(X)
-        explainer = shap.TreeExplainer(model, X_processed)
-        
-        return model, preprocessor, explainer, data
+        model = joblib.load('hvac_xgboost_model2.joblib')
+        preprocessor = joblib.load('hvac_preprocessor2.joblib')
+        label_encoder = joblib.load('hvac_label_encoder2.joblib')
+        feature_names = joblib.load('hvac_feature_names2.joblib')
+        explainer = joblib.load('hvac_shap_explainer2.joblib')
+        data = pd.read_csv('temp.csv')
+        return model, preprocessor, label_encoder, feature_names, explainer, data
     except FileNotFoundError as e:
-        st.error(f"Error loading resources: {e}. Make sure the necessary files (.joblib, .csv) are in the same directory.")
-        return None, None, None, None
+        st.error(f"Error loading required file: {e}. Please ensure all .joblib and .csv files from the training notebook are in the same directory.")
+        return (None,) * 6
 
-model, preprocessor, explainer, df = load_resources()
+model, preprocessor, label_encoder, feature_names, explainer, df = load_resources()
 
 if model is None:
     st.stop()
 
-# --- Helper Function for Data Generation (from notebook) ---
-# This function simulates new, incoming data for the real-time tab
+# --- Helper Functions ---
+def create_shap_waterfall_plot(shap_explanation_slice):
+    """
+    Generates a SHAP waterfall plot as a base64 encoded image
+    to be displayed in Streamlit.
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+    shap.plots.waterfall(shap_explanation_slice, max_display=15, show=False)
+    fig.tight_layout()
+    
+    buf = BytesIO()
+    fig.savefig(buf, format="png", bbox_inches='tight')
+    plt.close(fig) # Close the plot to free up memory
+    
+    # Encode the image to base64
+    data = base64.b64encode(buf.getbuffer()).decode("ascii")
+    return f"<img src='data:image/png;base64,{data}'/>"
+
 def generate_live_data(asset_types, fault_codes):
-    """Generates a single row of synthetic data based on notebook logic."""
+    """Generates a single row of synthetic data."""
     data_point = {
         'asset_type': np.random.choice(asset_types),
         'age_months': np.random.randint(1, 180),
@@ -53,25 +71,21 @@ def generate_live_data(asset_types, fault_codes):
         'temperature_celsius': np.random.normal(22, 4)
     }
     # Ensure service days < age days
-    while data_point['last_service_days_ago'] >= data_point['age_months'] * 30:
-        data_point['last_service_days_ago'] = np.random.randint(1, 730)
+    if data_point['last_service_days_ago'] >= data_point['age_months'] * 30:
+        data_point['last_service_days_ago'] = np.random.randint(1, data_point['age_months'] * 30)
     return data_point
 
 # --- Dashboard UI ---
 st.title("HVAC Predictive Maintenance Dashboard ❄️")
-
-# Use tabs for different sections of the dashboard
 tab1, tab2, tab3 = st.tabs(["📊 Historical Analysis", "🔮 Criticality Prediction Tool", "📡 Real-Time Simulation"])
-
 
 # ==============================================================================
 # TAB 1: HISTORICAL ANALYSIS
 # ==============================================================================
 with tab1:
     st.header("Historical Alert Analysis")
-
-    # --- Sidebar Filters ---
     st.sidebar.header("Filter Historical Data")
+    
     asset_type_filter = st.sidebar.multiselect(
         'Filter by Asset Type:',
         options=df['asset_type'].unique(),
@@ -82,61 +96,32 @@ with tab1:
         options=df['criticality'].unique(),
         default=df['criticality'].unique()
     )
-
     filtered_df = df[df['asset_type'].isin(asset_type_filter) & df['criticality'].isin(criticality_filter)]
 
     if filtered_df.empty:
         st.warning("No data matches the selected filters.")
     else:
-        # --- KPIs / Metrics ---
-        total_alerts = filtered_df.shape[0]
-        high_criticality_alerts = filtered_df[filtered_df['criticality'] == 'High'].shape[0]
-        avg_asset_age = int(filtered_df['age_months'].mean())
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Alerts", f"{total_alerts}")
-        col2.metric("High Criticality Alerts", f"{high_criticality_alerts}")
-        col3.metric("Avg. Asset Age (Months)", f"{avg_asset_age}")
-        
+        # KPIs
+        total_alerts, high_alerts, avg_age = st.columns(3)
+        total_alerts.metric("Total Alerts", f"{filtered_df.shape[0]}")
+        high_alerts.metric("High Criticality Alerts", f"{filtered_df[filtered_df['criticality'] == 'High'].shape[0]}")
+        avg_age.metric("Avg. Asset Age (Months)", f"{int(filtered_df['age_months'].mean())}")
         st.markdown("---")
 
-        # --- Visualizations ---
-        col1, col2 = st.columns((6, 4)) # Make first column wider
-
+        # Visualizations
+        col1, col2 = st.columns([2, 1])
         with col1:
             st.subheader("Alerts by Asset Type and Criticality")
-            fig_bar = px.bar(
-                filtered_df,
-                x='asset_type',
-                color='criticality',
-                barmode='group',
-                title="Count of Alerts",
-                labels={'asset_type': 'Asset Type', 'count': 'Number of Alerts'},
-                color_discrete_map={'High': '#EF553B', 'Medium': '#FECB52', 'Low': '#636EFA'}
-            )
-            fig_bar.update_layout(xaxis_title="Asset Type", yaxis_title="Number of Alerts")
-            st.plotly_chart(fig_bar, use_container_width=True)
-
+            fig = px.bar(filtered_df.groupby(['asset_type', 'criticality']).size().reset_index(name='count'),
+                         x='asset_type', y='count', color='criticality', barmode='group',
+                         color_discrete_map={'High': '#EF553B', 'Medium': '#FECB52', 'Low': '#636EFA'})
+            st.plotly_chart(fig, use_container_width=True)
         with col2:
             st.subheader("Criticality Distribution")
-            fig_pie = px.pie(
-                filtered_df,
-                names='criticality',
-                title="Overall Criticality",
-                hole=0.3,
-                color_discrete_map={'High': '#EF553B', 'Medium': '#FECB52', 'Low': '#636EFA'}
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-        st.subheader("Sensor Reading Distributions")
-        col1, col2 = st.columns(2)
-        with col1:
-            fig_pressure = px.histogram(filtered_df, x='pressure_psi', title='Pressure (PSI) Distribution', nbins=30)
-            st.plotly_chart(fig_pressure, use_container_width=True)
-        with col2:
-            fig_temp = px.histogram(filtered_df, x='temperature_celsius', title='Temperature (°C) Distribution', nbins=30)
-            st.plotly_chart(fig_temp, use_container_width=True)
-            
+            fig = px.pie(filtered_df, names='criticality', hole=0.4,
+                         color_discrete_map={'High': '#EF553B', 'Medium': '#FECB52', 'Low': '#636EFA'})
+            st.plotly_chart(fig, use_container_width=True)
+        
         st.subheader("Filtered Data View")
         st.dataframe(filtered_df)
 
@@ -145,156 +130,100 @@ with tab1:
 # ==============================================================================
 with tab2:
     st.header("Predict Alert Criticality")
-    st.markdown("Use the form below to get a real-time prediction and explanation for a new alert.")
-    
-    # --- Input Form ---
+    st.markdown("Use the form to get a real-time prediction and explanation for a new alert.")
+
     with st.form("prediction_form"):
         col1, col2 = st.columns(2)
         with col1:
             asset_type = st.selectbox("Asset Type", options=df['asset_type'].unique())
             age_months = st.slider("Age of Asset (months)", 1, 240, 60)
-            last_service_days_ago = st.slider("Days Since Last Service", 1, 730, 90)
+            last_service_days_ago = st.slider("Days Since Last Service", 1, 1000, 90)
         with col2:
             fault_code = st.selectbox("Fault Code", options=df['fault_code'].unique())
             pressure_psi = st.number_input("Pressure (PSI)", 50.0, 250.0, 150.0, 0.1)
             temperature_celsius = st.number_input("Temperature (°C)", 0.0, 50.0, 22.0, 0.1)
         
-        submitted = st.form_submit_button("Predict")
+        submitted = st.form_submit_button("Predict Criticality")
 
     if submitted:
         input_data = pd.DataFrame([{
-            'asset_type': asset_type,
-            'age_months': age_months,
-            'last_service_days_ago': last_service_days_ago,
-            'fault_code': fault_code,
-            'pressure_psi': pressure_psi,
-            'temperature_celsius': temperature_celsius
+            'asset_type': asset_type, 'age_months': age_months,
+            'last_service_days_ago': last_service_days_ago, 'fault_code': fault_code,
+            'pressure_psi': pressure_psi, 'temperature_celsius': temperature_celsius
         }])
 
-        # --- Prediction and Explanation ---
+        # Process input and predict
         processed_input = preprocessor.transform(input_data)
-        prediction_class = model.predict(processed_input)
-        prediction_proba = model.predict_proba(processed_input)
+        prediction_index = model.predict(processed_input)[0]
+        prediction_name = label_encoder.classes_[prediction_index]
+        prediction_proba = model.predict_proba(processed_input)[0]
+
+        st.subheader("Prediction Result")
+        color = "green"
+        if prediction_name == 'High': color = "red"
+        elif prediction_name == 'Medium': color = "orange"
+        st.markdown(f"Predicted Criticality: <strong style='color:{color}; font-size:1.2em;'>{prediction_name}</strong>", unsafe_allow_html=True)
         
-        # Get class labels from the model
-        class_labels = model.classes_
-        predicted_criticality = class_labels[prediction_class[0]]
-        
-        st.subheader("Criticality")
-        # st.metric("Predicted Criticality", predicted_criticality)
-        if predicted_criticality==0:
-            st.error('High')
-        elif predicted_criticality==1:
-            st.warning('Medium')
-        else:
-            st.success('Low')
 
-        #SHAP Analysis is under development
-
-        # Display probabilities in a more readable format
-        # st.write("Prediction Probabilities:")
-        # prob_df = pd.DataFrame(prediction_proba, columns=class_labels)
-        # st.dataframe(prob_df.style.format("{:.2%}"))
-
-        # # --- SHAP Explanation Plot ---
-        # st.subheader("Prediction Explanation (SHAP Analysis)")
-        # shap_values = explainer.shap_values(processed_input)
-
-        # try:
-        #     # Calculate SHAP values for the specific input
-        #     shap_values = explainer.shap_values(processed_input)
-
-        #     # For a multi-class model, shap_values and expected_value are lists.
-        #     # We need to select the values for the class that was predicted.
-        #     predicted_class_index = prediction_class[0]
-
-        #     st.write(f"Displaying explanation for the predicted class: **{model.classes_[predicted_class_index]}**")
-
-        #     # Correctly call shap.force_plot with the base value as the first argument.
-        #     # This function is ideal for explaining a single prediction.
-        #     shap_plot = shap.force_plot(
-        #         base_value=explainer.expected_value[predicted_class_index],
-        #         shap_values=shap_values[predicted_class_index],
-        #         features=input_data
-        #     )
+        # SHAP Explanation Plot
+        st.subheader("Prediction Explanation (SHAP Waterfall Plot)")
+        try:
+            # Create a SHAP Explanation object for the input
+            shap_explanation = explainer(processed_input)
             
-        #     # To render the plot in Streamlit, we wrap its HTML output with the necessary SHAP JavaScript.
-        #     shap_html = f"<head>{shap.getjs()}</head><body>{shap_plot.html()}</body>"
-        #     st.components.v1.html(shap_html, height=150)
+            # Slice the explanation for the specific predicted class
+            instance_class_explanation = shap_explanation[0, :, prediction_index]
             
-        #     st.info("""
-        #     **How to read this plot:**
-        #     *   The **base value** is the average prediction for this class across the entire training dataset.
-        #     *   Features in **red** are pushing the prediction score **higher** (towards a 'High' or 'Medium' criticality).
-        #     *   Features in **blue** are pushing the prediction score **lower**.
-        #     *   The final **output value** is the model's raw score for this specific prediction.
-        #     """)
+            # Generate and display the plot
+            waterfall_html = create_shap_waterfall_plot(instance_class_explanation)
+            st.markdown(waterfall_html, unsafe_allow_html=True)
 
-        # except Exception as e:
-        #     st.error(f"An error occurred while generating the SHAP explanation plot: {e}")
-        #     st.warning("The prediction is still valid, but the explanation could not be displayed.")
-
-        # st.components.v1.html(shap_html, height=150)
-        # st.info("The plot above shows the features pushing the prediction towards (red) or away from (blue) the final outcome. The 'base value' is the average prediction over the training data.")
+            st.info("""
+            **How to read this plot:**
+            *   **E[f(x)]** is the baseline prediction score (the average for this class).
+            *   Features in **red** push the score **higher** (increasing the likelihood of this prediction).
+            *   Features in **blue** push the score **lower**.
+            *   **f(x)** is the final output score for this specific prediction.
+            """)
+        except Exception as e:
+            st.error(f"An error occurred while generating the SHAP explanation: {e}")
 
 # ==============================================================================
 # TAB 3: REAL-TIME SIMULATION
 # ==============================================================================
 with tab3:
     st.header("Live Alert Feed Simulation")
-    
     if 'live_data' not in st.session_state:
-        st.session_state.live_data = pd.DataFrame(columns=list(df.columns.drop(['criticality', 'alert_id'])))
+        st.session_state.live_data = pd.DataFrame()
 
-    # --- Control Panel ---
     is_running = st.toggle("Start/Stop Simulation", value=False)
-    
-    # --- Placeholders for live updates ---
     placeholder = st.empty()
-    
+
     if is_running:
-        while True:
-            # Generate new data point
-            new_data_point = generate_live_data(df['asset_type'].unique(), df['fault_code'].unique())
-            new_df_row = pd.DataFrame([new_data_point])
+        new_data_point = generate_live_data(df['asset_type'].unique(), df['fault_code'].unique())
+        new_df_row = pd.DataFrame([new_data_point])
+        
+        # Predict criticality
+        processed_new = preprocessor.transform(new_df_row)
+        prediction_index = model.predict(processed_new)[0]
+        new_data_point['predicted_criticality'] = label_encoder.classes_[prediction_index]
+        
+        # Prepend to session state dataframe
+        new_row_df = pd.DataFrame([new_data_point])
+        st.session_state.live_data = pd.concat([new_row_df, st.session_state.live_data], ignore_index=True).head(20)
 
-            # Preprocess and predict
-            processed_new = preprocessor.transform(new_df_row)
-            prediction = model.predict(processed_new)
-            new_data_point['criticality'] = model.classes_[prediction[0]]
-            
-            # Add to session state
-            st.session_state.live_data = pd.concat([pd.DataFrame([new_data_point]), st.session_state.live_data], ignore_index=True).head(50) # Keep last 50
-            
-            with placeholder.container():
-                # --- Live Metrics ---
-                kpi1, kpi2, kpi3 = st.columns(3)
-                
-                # Highlight if the latest alert is 'High'
-                latest_criticality = st.session_state.live_data.iloc[0]['criticality']
-                if latest_criticality == 'High':
-                    kpi1.error(f"🔴 Latest Alert: High Criticality")
-                else:
-                    kpi1.success(f"🟢 Latest Alert: {latest_criticality}")
-                
-                high_count = (st.session_state.live_data['criticality'] == 'High').sum()
-                kpi2.metric("High Criticality Count (last 50)", f"{high_count}")
-                kpi3.metric("Total Alerts Simulated", f"{len(st.session_state.live_data)}")
+        with placeholder.container():
+            kpi1, kpi2, kpi3 = st.columns(3)
+            latest_criticality = st.session_state.live_data.iloc[0]['predicted_criticality']
+            color = {'High': 'error', 'Medium': 'warning', 'Low': 'success'}.get(latest_criticality, 'info')
+            getattr(kpi1, color)(f"🔴 Latest Alert: {latest_criticality}")
 
-                # --- Live Graph ---
-                st.subheader("Live Criticality Counts")
-                fig_live_bar = px.bar(
-                    st.session_state.live_data['criticality'].value_counts().reset_index(),
-                    x='criticality',
-                    y='count',
-                    title="Live Distribution of Alert Criticality",
-                    color_discrete_map={'High': '#EF553B', 'Medium': '#FECB52', 'Low': '#636EFA'},
-                    color='criticality'
-                )
-                st.plotly_chart(fig_live_bar, use_container_width=True)
+            high_count = (st.session_state.live_data['predicted_criticality'] == 'High').sum()
+            kpi2.metric("High Criticality Alerts (last 20)", f"{high_count}")
+            kpi3.metric("Total Alerts Simulated", len(st.session_state.live_data))
 
-                # --- Live Data Table ---
-                st.subheader("Latest Alerts Log")
-                st.dataframe(st.session_state.live_data)
-
-            time.sleep(2) # Delay to simulate real-time feed
+            st.subheader("Live Data Log")
+            st.dataframe(st.session_state.live_data)
+        
+        time.sleep(2) # Wait 2 seconds before rerunning
+        st.rerun()
