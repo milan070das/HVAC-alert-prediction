@@ -92,4 +92,4 @@ To ensure the model is not a "black box," **SHAP** is used for explainability:
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
-Live working of application: hvac-alert-001.streamlit.app
+**Live working of application:** hvac-alert-001.streamlit.app
