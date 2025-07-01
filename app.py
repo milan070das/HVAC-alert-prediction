@@ -26,12 +26,12 @@ def load_resources():
     and the SHAP explainer from disk.
     """
     try:
-        model = joblib.load('hvac_xgboost_model2.joblib')
-        preprocessor = joblib.load('hvac_preprocessor2.joblib')
-        label_encoder = joblib.load('hvac_label_encoder2.joblib')
-        feature_names = joblib.load('hvac_feature_names2.joblib')
-        explainer = joblib.load('hvac_shap_explainer2.joblib')
-        data = pd.read_csv('temp.csv')
+        model = joblib.load('hvac_xgboost_model.joblib')
+        preprocessor = joblib.load('hvac_preprocessor.joblib')
+        label_encoder = joblib.load('hvac_label_encoder.joblib')
+        feature_names = joblib.load('hvac_feature_names.joblib')
+        explainer = joblib.load('hvac_shap_explainer.joblib')
+        data = pd.read_csv('hvac_maintenance_data.csv')
         return model, preprocessor, label_encoder, feature_names, explainer, data
     except FileNotFoundError as e:
         st.error(f"Error loading required file: {e}. Please ensure all .joblib and .csv files from the training notebook are in the same directory.")
